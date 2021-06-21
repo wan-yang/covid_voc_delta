@@ -10,7 +10,7 @@ Note that some of the supporting scripts may be found in https://github.com/wan-
 
 
 ### results
-This folder includes compiled model-inference results, as labeled 
+This folder includes compiled model-inference results, as labeled. 
 Note that because the files are too large, we do not include results from individual runs. For interested readers, please run those using the provided code on your local machine and then compile the results using the analysis code. 
 
 ### contact
