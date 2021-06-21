@@ -6,12 +6,12 @@ This folder includes all relavant data needed to run the model-inference and sim
 
 ### scripts
 This folder includes all model code used in this study. 
-Note that some of the supporting scripts are included in https://github.com/wan-yang/covid_voc_study
+Note that some of the supporting scripts may be found in https://github.com/wan-yang/covid_voc_study
 
 
 ### results
 This folder includes compiled model-inference results, as labeled 
-Note that for the multi-variant simulations, because the files are too large, we do not include those. For interested readers, please run those using the provided code on your local machine and then compile the results using the analysis code. 
+Note that because the files are too large, we do not include results from individual runs. For interested readers, please run those using the provided code on your local machine and then compile the results using the analysis code. 
 
 ### contact
 wy2202 at cumc.columbia.edu
