@@ -1,4 +1,4 @@
-## Code and data for: Yang & Shaman, COVID-19 pandemic dynamics in India and impact of the SARS-CoV-2 Delta (B.1.617.2) variant
+## Code and data for: Yang & Shaman, COVID-19 pandemic dynamics in India and impact of the SARS-CoV-2 Delta (B.1.617.2) variant. medRxiv, 2021. 2021.06.21.21259268.
 
 
 ### data
@@ -17,4 +17,4 @@ Note that because the files are too large, we do not include results from indivi
 wy2202 at cumc.columbia.edu
 
 ### reference
-Wan Yang & Jeffrey Shaman, COVID-19 pandemic dynamics in India and impact of the SARS-CoV-2 Delta (B.1.617.2) variant
+Wan Yang & Jeffrey Shaman, COVID-19 pandemic dynamics in India and impact of the SARS-CoV-2 Delta (B.1.617.2) variant. medRxiv, 2021. 2021.06.21.21259268. https://www.medrxiv.org/content/10.1101/2021.06.21.21259268v1
