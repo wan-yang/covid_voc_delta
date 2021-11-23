@@ -1,5 +1,4 @@
 # use weather data to represent seasonality
-# developed in H. Yuan, S. C. Kramer, E. H. Y. Lau, B. J. Cowling, W. Yang, Modeling Influenza Seasonality in the Tropics and Subtropics. PLoS Comput Biol In press,  (2021).
 # 2/28/21
 
 
@@ -88,7 +87,7 @@ fn_getRelR0 = function(loc.t, ref.wk, Rwea_parm.bounds, smooth = T){
   # relative to the mean?
   relR0 = relR0 / matrix(colMeans(relR0[-53,]), nrow(relR0), num_ens, byrow=T) # relative to to spring
   # smooth the curve
-  relR0 = relR0 %>% apply(2, filter, filter = rep(1/3,3), circular = T)
+  relR0 = relR0 %>% apply(2, stats::filter, filter = rep(1/3,3), circular = T)
   
   relR0
 }
@@ -98,6 +97,8 @@ fn_getRelR0 = function(loc.t, ref.wk, Rwea_parm.bounds, smooth = T){
 # lines(relR0 %>% rowMeans(), lwd=2)
   
   
+
+
 # by state
 fn_getRelR0.loc = function(da.t, ref.wk, Rwea_parm.bounds, smooth = T){
   # loc.t = 'UK'
@@ -184,7 +185,7 @@ fn_getRelR0.loc = function(da.t, ref.wk, Rwea_parm.bounds, smooth = T){
   # relative to the mean?
   relR0 = relR0 / matrix(colMeans(relR0[-53,]), nrow(relR0), num_ens, byrow=T) # relative to to spring
   # smooth the curve
-  relR0 = relR0 %>% apply(2, filter, filter = rep(1/3,3), circular = T)
+  relR0 = relR0 %>% apply(2, stats::filter, filter = rep(1/3,3), circular = T)
   
   relR0
 }

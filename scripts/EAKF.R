@@ -1,3 +1,7 @@
+## function to compute the cummulative likelihood for the entire time series using the EAKF
+## 10/28/21
+
+
 # 3/16/21 - multiple tests using the eakf, 
 # each round allow 1 hyp - change beta only, change S only, change both beta and S but more for S, change both but more for beta
 # compare result and output best performing est
@@ -54,6 +58,24 @@ Fn_getRt_SEIR=function(PARMS){
 
 fn_getRelMob = function(rel.mob.t, p.mob.t){ # return the scaled moblity for adjusting tx
   (rel.mob.t * p.mob.t) %>% pmin(1) # make sure it's <=1
+}
+
+fn_getImmLoss = function(N, S.t, E.t, I.t, tmstep, Trs.t, ts.ImmLoss.t, 
+                         cum.ImmLoss.t){
+  # Trs.t = mean(state0['Trs',])
+  # ts.ImmLoss[tt] = (N - Spost[tt] - Epost[tt] - Ipost[tt])/Trs.t * tmstep
+  ts.ImmLoss.t = ts.ImmLoss.t %>% unlist
+  ts.ImmLoss = append(ts.ImmLoss.t, 
+                      (N - S.t - E.t - I.t)/Trs.t * tmstep
+                      )
+  
+  wk.immloss = pmin(2*52, round(Trs.t / 7 * .75, 0)) # go back half of the immunity period? but no more than 2 years
+  
+  t.end = length(ts.ImmLoss)
+  cum.ImmLoss = sum(ts.ImmLoss[pmax(1, t.end-wk.immloss):t.end])  # wk.immloss: how far do we wanna go back?
+  print(paste('% cum.ImmLoss:', round(cum.ImmLoss / N * 100, 2)))
+  
+  return(list(ts.ImmLoss = ts.ImmLoss, cum.ImmLoss = cum.ImmLoss))
 }
 
 library("truncnorm"); library("tgp"); library('mvtnorm'); # for lhs
@@ -121,6 +143,9 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
            'both.minorb.slows.minor', 'both.majorb.slows.minor'  # for BR
            ) # 'beta.only.grad',
   
+  
+  # hyps = 'beta.only.major'
+  
   if(loc.t !='br'){
     hyps = hyps[!grepl('slows.minor', hyps)]
   }
@@ -135,8 +160,6 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
     print(hyp.t)
     
     # number parms allow the probe
-
-    # slightly low for beta as it's more challenging and more restricted
     if (grepl('beta.only',hyp.t)){
       n.parm.sr = 1
       
@@ -223,9 +246,7 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
       cntSadj_small.tot.t = SRparms$cntSadj_small.tot.minor # 4
       cntSadjtot.cut = SRparms$cntSadjtot.cut.minor
       cum.dS.cut = SRparms$cum.dS.cut.minor
-      # Spb_large.t = .25 # .1
-      # Spb_median.t = .15
-      # Spb_small.t = .1
+
       Spb_large.t = SRparms$Spb_large.minor # .25
       Spb_median.t = SRparms$Spb_median.minor  # .1
       Spb_small.t = SRparms$Spb_small.minor # .05
@@ -331,6 +352,10 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
     # Spb.adj_upr = 1.25; Spb.adj_lwr = .75 # likely help
     Spb.adj_upr = SRparms$Spb.adj_upr; Spb.adj_lwr = SRparms$Spb.adj_lwr
 
+    # 10/28/21 also record the lost of immunity due to waning, based on the posterior
+    cum.ImmLoss = 0 # number of people had prior infection but lost their immunity due to waning
+    ts.ImmLoss = NULL; numeric(num_times_i); # time series by week to give more flexibility
+    
     # 4/18/21 need to monitor the cumulative change in S
     cum.dS.perc = 0; # percentage, relative to total from first wave
     cum.dS.po = 0; # posterior, only include weeks with probing on s
@@ -361,6 +386,16 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
     update2widerSR1 = update2widerSR2 = F
     wk.update2widerSR2 = num_times_i
     
+    if(F){
+      sr.primes = c('s','beta')
+      sr.primez_vec = NULL
+      sr.prime.t = NULL
+      if(grepl('s.first', hyp.t)){
+        sr.prime.t = 's' # set the first SR to be on S mainly
+      } else if (grepl('beta.first', hyp.t)){
+        sr.prime.t = 'beta' # set the first SR to be on S mainly
+      }
+    }
      
     
     {
@@ -406,13 +441,16 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
         # tm.t = pmax(1, tm.t - t1 + 1) # re-aline timing with start of vac
         tm.imm = 365*2.5 # assume 3 yr immunity
         p.imm.wane.max = .8; k = .015  # 1/tm.imm  
-        p.imm.wane = 1 - p.imm.wane.max / (1+exp(-k*(tm.t + 60 - tm.imm/2))) # not all infected from day 1
+        # since only the last year is included, should be:
+        p.imm.wane = 1 - p.imm.wane.max / (1+exp(-k*(pmin(t1, tm.t) + 60 - tm.imm/2))) # not all infected from day 1
         # earlier infections are likely to be in the high priority groups 
         p.imm = 1 *  p.imm.wane * redn.priority # assume 100% prior infection provide immunity, but wane over time
         # and multiple by % excluded if there is prior testing before vax: p.prior.test
         percSmax.t = 1 - cumI.t / N * p.imm
+        # also compare to current susceptibility, in case of immune evasion that increases susceptiblity
+        percSmax.t = pmax(percSmax.t, state0[paste0('S',1:num_gr),] / N)
         # no lower than 50%, in case of outliers
-        percSmax.t = pmax(percSmax.t, .5)
+        # percSmax.t = pmax(percSmax.t, .5)
         # print(c('cohort %S:',round(summary(mean(percSmax.t)),2)), quote = F)
       } else {
         percSmax.t = 0
@@ -476,7 +514,11 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
                       V1 = V1.t, V2 = V2.t, # add vaccination for dose 1 and dose 2 -
                       # these are total number of vaccinees with unknown immunity
                       # but pre-ajust for time lag from vaccination to immune protection
-                      VE1 = VE1, VE2=VE2 # Vaccine efficacy, need further adjustment by prior immunity 
+                      VE1 = VE1, VE2=VE2, # Vaccine efficacy, need further adjustment by prior immunity
+                      diffVEforPriorInf = T, # whether to consider possible high ve after 1 dose for those with prior infection
+                      VE1priorInf = VE1priorInf, VE2priorInf = VE2priorInf, # Vaccine efficacy, for those with prior infection
+                      cum.dS.po = cum.dS.po, # number of peope had prior infection but lost their immunity due to the immune evasive variant
+                      cum.ImmLoss = cum.ImmLoss # number of people had prior infection but lost their immunity due to waning
         ) # include the delay reporting etc.
       }
       
@@ -598,6 +640,20 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
         
       }
       
+      # update detection rate after mass-vaccination increase vacc coverage and/or very high prior infection rate -> milder infection -> lower detection rate
+      if(exists('wk2lowerAlphaPostVac')){
+        if(tt == wk2lowerAlphaPostVac){
+          SR.bounds['alpha',] = SRalpha_boundsPostVac
+          SR.bounds.wider.t['alpha',] = SRalpha_boundsPostVac
+          SR.bounds.wider2.t['alpha',] = SRalpha_boundsPostVac
+          DA.bounds['alpha',] = DAalpha_boundsPostVac
+          print('update to SRalpha_boundsPostVac')
+        }
+        
+      }
+      
+      
+      
       # update IFR bounds
       if(loc.t %in% c('uk','sa', 'br','in')){
         if(tt %in% wk.WkLowIFR){  # WkLowIFR low ifr
@@ -617,6 +673,17 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
             SR.bounds.wider2.t['ifr',] = SRifr_bounds3
           }
         }
+        
+        # lower IFR after the crisis passed
+        if(loc.t %in% c('in')){  # 'uk', 'br', 
+          if(tt == wk2lowerIFRPostVac){ # even higher IFR which the system collapse
+            SR.bounds['ifr',] = SRifr_boundsPostVac
+            SR.bounds.wider.t['ifr',] = SRifr_boundsPostVac
+            SR.bounds.wider2.t['ifr',] = SRifr_boundsPostVac
+            print('update to SRifr_boundsPostVac')
+          }
+        }
+        
       }
 
       
@@ -624,6 +691,13 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
       #   SR.bounds['ifr',] = SRifr_bounds2
       # }
       
+      # prevent it shifting off
+      if(F){
+        if(tt == 10 & loc.t %in% paste0('sce',1:4)) {
+          SR.bounds['alpha',1] = SR.bounds['alpha',1] * 1.2  # reduce uncertainty
+          SR.bounds['alpha',2] = SR.bounds['alpha',2] * 1.2
+        }
+      }
       
       
       
@@ -757,6 +831,13 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
       Ipost[tt] = state0['I1',] %>% mean
       Spost[tt] = state0['S1',] %>% mean
       Itotpost[tt] = state0['newItot1',] %>% mean
+      # compute lost of immunity due to waning
+      Trs.t = mean(state0['Trs',])
+      
+      tmp = fn_getImmLoss(N, S.t=Spost[tt], E.t=Epost[tt], I.t=Ipost[tt], tmstep=tmstep, Trs.t=Trs.t, 
+                    ts.ImmLoss.t=ts.ImmLoss)
+      ts.ImmLoss = tmp$ts.ImmLoss
+      cum.ImmLoss = tmp$cum.ImmLoss
       
       # update daily estimates as well
       {
@@ -982,10 +1063,6 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
             }
             
               
-            # lower the upper bound for beta and Tir?
-            # SR.bounds.tight[c('beta'),2] = parm.bounds[c('beta'),2] * .8
-            # SR.bounds.tight[c('Tir'),2] = parm.bounds[c('Tir'),2] * .8
-            # SR.bounds.tight[c('Tei'),1] = 3
           }
           
           
@@ -1009,10 +1086,7 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
             }
             
             
-            
-            
-            # (xpost_mean$newItot1 - xprior_mean$newItot1)/mn.pr
-            # (xpost_mean$newItot1 - xprior_mean$newItot1)
+
             
             # if the level of change is extremely large, adjust SRflag to make sure it gets updated earlier
             if((((mn.po - mn.pr) / mn.pr >= p.major.cut * 1.5 & (mn.po - mn.pr) / mn.pr < p.major.cut * 2) | 
@@ -1148,7 +1222,6 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
               # cntSRwave2 = cntSRwave2 + abs(dS.mn) / cumIwave1 * 10
               stop.srS = T
               wk.srS.last = tail(stat.sr.S$week,1)
-              
               
               # extend it by 2 weeks if so
             }
@@ -1485,6 +1558,7 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
         }
         
         
+        
         SR.bounds.local.t = cbind(sr.local.lwr, sr.local.upr)
         state0[SR.var.local.t,SR.idx.local.t] = t(lhs(num_SR.local.t, rect =  SR.bounds.local.t[SR.var.local.t,]))
         state0[SR.var.full.t,SR.idx.full.t] = t(lhs(num_SR.full.t, rect = SRbounds.full.t[SR.var.full.t,]))
@@ -1501,14 +1575,30 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
           state0['ifr', idx] = runif(length(idx), min = SRifr_bounds1[1], max = SRifr_bounds1[2])
         }
         # to account for increase in detection rate
-        if(loc.t == 'in' & tt %in% tt.alpha.incr1) {  # do it a few times; help a bit but not critical
-          idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
-          state0['alpha', idx] = runif(length(idx), min = alpha_bounds2[1]*.5, max = alpha_bounds2[2]*.6)
+        if(loc.t == 'in'){
+          if(loc.t == 'in' & tt %in% tt.alpha.incr1) {  # do it a few times; help a bit but not critical
+            idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
+            state0['alpha', idx] = runif(length(idx), min = alpha_bounds2[1]*.5, max = alpha_bounds2[2]*.6)
+          }
+          if(loc.t == 'in' & tt %in% tt.alpha.incr2) {  # do it a few times; help a bit but not critical
+            idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
+            state0['alpha', idx] = runif(length(idx), min = alpha_bounds2[1], max = alpha_bounds2[2])
+          }
         }
-        if(loc.t == 'in' & tt %in% tt.alpha.incr2) {  # do it a few times; help a bit but not critical
-          idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
-          state0['alpha', idx] = runif(length(idx), min = alpha_bounds2[1], max = alpha_bounds2[2])
-        }
+        
+        # to account for decrease in detection rate / ifr, following mass vacc
+        if(exists('wk2lowerAlphaPostVac')){
+          if(tt %in% c(wk2lowerAlphaPostVac+0:3)){
+            idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
+            state0['alpha', idx] = runif(length(idx), min = SRalpha_boundsPostVac[1], max = SRalpha_boundsPostVac[2]* (.8 - .1*(tt-wk2lowerAlphaPostVac))
+                                         )
+          }
+          # for mortality
+          if(tt %in% c(wk2lowerIFRPostVac+0:4)){
+            idx = sample(1:num_ens, round(num_ens * .1, 0), replace = F)
+            state0['ifr', idx] = runif(length(idx), min = SRifr_boundsPostVac[1], max = SRifr_boundsPostVac[2]*(.9 - .1*(tt-wk2lowerIFRPostVac)))
+          }
+         }
         
         # additional SR on beta if needed
         if(extraSRbeta & (! grepl('s.only', hyp.t)) &
@@ -1550,6 +1640,7 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
           
           # SR.idx.t = sample(samps, round(num_ens * .1 * p.tmp, 0), replace = F)
           SR.idx.t = sample(samps, pmin(round(num_ens * .1 * p.tmp, 0), length(samps)), replace = F)
+          
           
           
           if((! grepl('s.only', hyp.t))){
@@ -1618,13 +1709,16 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
           # tm.t = pmax(1, tm.t - t1 + 1) # re-aline timing with start of vac
           tm.imm = 365* 2.5 # assume 3 yr immunity
           p.imm.wane.max = .8; k = .015  # 1/tm.imm  
-          p.imm.wane = 1 - p.imm.wane.max / (1+exp(-k*(tm.t + 60 - tm.imm/2))) # not all infected from day 1
+          # since only the last year is included, should be:
+          p.imm.wane = 1 - p.imm.wane.max / (1+exp(-k*(pmin(t1, tm.t) + 60 - tm.imm/2))) # not all infected from day 1
           # earlier infections are likely to be in the high priority groups 
           p.imm = 1 *  p.imm.wane * redn.priority # assume 100% prior infection provide immunity, but wane over time
           # and multiple by % excluded if there is prior testing before vax: p.prior.test
           percSmax.t = 1 - cumI.t / N * p.imm
+          # also compare to current susceptibility, in case of immune evasion that increases susceptiblity
+          percSmax.t = pmax(percSmax.t, state0[paste0('S',1:num_gr),] / N)
           # no lower than 50%, in case of outliers
-          percSmax.t = pmax(percSmax.t, .5)
+          # percSmax.t = pmax(percSmax.t, .5)
           # print(c('cohort %S:',round(summary(mean(percSmax.t)),2)), quote = F)
         } else {
           percSmax.t = 0
@@ -1697,7 +1791,11 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
                         V1 = V1.t, V2 = V2.t, # add vaccination for dose 1 and dose 2 -
                         # these are total number of vaccinees with unknown immunity
                         # but pre-ajust for time lag from vaccination to immune protection
-                        VE1 = VE1, VE2=VE2 # Vaccine efficacy, need further adjustment by prior immunity 
+                        VE1 = VE1, VE2=VE2, # Vaccine efficacy, need further adjustment by prior immunity
+                        diffVEforPriorInf = T, # whether to consider possible high ve after 1 dose for those with prior infection
+                        VE1priorInf = VE1priorInf, VE2priorInf = VE2priorInf, # Vaccine efficacy, for those with prior infection
+                        cum.dS.po = cum.dS.po, # number of peope had prior infection but lost their immunity due to the immune evasive variant
+                        cum.ImmLoss = cum.ImmLoss # number of people had prior infection but lost their immunity due to waning
           ) # include the delay reporting etc.
         }
         
@@ -1809,6 +1907,38 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
                               perc.dImm.mn = 0, perc.dImm.sd = 0)
       }
       
+      if(F){
+        if (nrow(stat.sr.S)>1){
+          xx.mean = numeric(nrow(stat.sr.S))
+          formula.t = 'x1'
+          for(i in 1:nrow(stat.sr.S)){
+            xx.t = stat.sr.S[i,3+1:num_ens,with=F] %>% unlist
+            xx.t.mn =xx.t %>% mean; 
+            # xx.t.var = var(xx.t); 
+            xx.mean[i] = xx.t.mn
+            # eval(parse(text=paste('xx',i,'=xx.t.mn',sep='')))
+            if(i > 1)
+              formula.t = paste0(formula.t,'+x',i)
+          }
+          
+          m.cov = cov(x=stat.sr.S[,3+1:num_ens,with=F]%>% t)
+          eval(parse(text = paste('tmp = deltamethod(~', formula.t, ', mean = xx.mean, cov = m.cov)'))) 
+          dS.tot.sd = tmp %>% sqrt
+          dS.tot.mn = sum(stat.sr.S$mean)
+          wk.t = stat.sr.S$week[1]
+          S0.2nd.strt = xpost['S1',,wk.t]
+          S0.2nd.mn = S0.2nd.strt %>% mean; S0.2nd.var = S0.2nd.strt %>% var
+          dS.ens = colSums(stat.sr.S[,3+1:num_ens,with=F])
+          Imm.ens = N - S0.2nd.strt; Imm.mn = Imm.ens %>% mean
+          m.cov = cov(x=cbind(dS.ens, Imm.ens))
+          perc.dImm.mn = dS.tot.mn / Imm.mn * 100
+          perc.dImm.sd = (deltamethod(~x1/x2, mean = c(dS.tot.mn, Imm.mn), cov = m.cov) %>% sqrt) * 100
+          
+        }
+      }
+      
+      
+      
       
       eval(parse(text = paste0('newVstat',ihyp,'=newVstat', sep='')))
       
@@ -1895,7 +2025,17 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
   rrmse$hyp = factor(rrmse$hyp, levels = hyps, labels = hyps)
   rrmse = rrmse[order(hyp)]
   
-  
+  if(F){
+    rrmse$cb.eq = NULL
+    rrmse$cb.obs.more = NULL
+    rrmse$cb.obs.most = NULL
+    rrmse$cb.obs.only = NULL
+    rrmse$cb.rank = NULL
+    
+    rrmse = rrmse.raw
+  }
+
+  # i.best = which.min(rrmse$cb.obs.only)
   
   # output for all eval method
   Rt_stats_all = R0_stats_all = Rtx_stats_all = Rtx_ens_all = states_stats_all = xpost_mean_all = 
@@ -2078,6 +2218,7 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
   
   
   
+  
   return(list(Rt_stats = Rt_stats_all, R0_stats = R0_stats_all, 
               Rtx_stats = Rtx_stats_all, 
               Rtx_ens = Rtx_ens_all,
@@ -2094,3 +2235,6 @@ EAKF = function(epi.model=epi.model, num_ens=num_ens,inflat=1.03,
               hyp.best_all = hyp.best_all))
   
 }
+
+
+
