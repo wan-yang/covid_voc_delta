@@ -25,4 +25,5 @@ Version 2:
 Wan Yang & Jeffrey Shaman, COVID-19 pandemic dynamics in India, the SARS-CoV-2 Delta variant, and implications for vaccination. medRxiv, 2021 2021.06.21.21259268; doi: https://doi.org/10.1101/2021.06.21.21259268
 
 Published:
-Yang W & Shaman J (2022) COVID-19 pandemic dynamics in India, the SARS-CoV-2 Delta variant and implications for vaccination. J R Soc Interface 19(191):20210900.
+Yang W & Shaman J (2022) COVID-19 pandemic dynamics in India, the SARS-CoV-2 Delta variant and implications for vaccination. J R Soc Interface 19(191):20210900. https://royalsocietypublishing.org/doi/10.1098/rsif.2021.0900
+
